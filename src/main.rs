@@ -26,7 +26,7 @@ struct Explosion {
 }
 
 const WORLD_SIZE: Vec2 = const_vec2!([1000.0, 1000.0]);
-const NUM_DUDES: i32 = 1000;
+const NUM_DUDES: i32 = 500;
 const EXPLODE_TIME: f64 = 1.5;
 const MAX_SPEED: f32 = 50.0;
 
@@ -66,7 +66,7 @@ fn handle_collisions(world: &ErgoScope<'_>, collisions: Vec<EntityCollision>) {
             },));
             physics
                 .read()
-                .get_entities_within(pos, 500.0, |collider, entity| {
+                .get_entities_within(pos, 50.0, |collider, entity| {
                     if entity != event.entity_a && entity != event.entity_b {
                         push_from_explosion(world, entity, pos);
                     }
@@ -96,8 +96,8 @@ fn push_from_explosion(world: &ErgoScope, entity: Entity, pos: Vec2) {
     let distance = diff.length();
     let dir = diff.normalize_or_zero();
     let push_power = 10000.0 / (distance * distance).max(0.01);
-    movement.write().velocity += dir * push_power;
-    movement.write().velocity.clamp_length_max(MAX_SPEED);
+    let current_velocity = movement.read().velocity;
+    movement.write().velocity = (current_velocity + dir * push_power).clamp_length_max(MAX_SPEED);
 }
 
 fn update_game(world: &ErgoScope<'_>) {
@@ -131,6 +131,10 @@ fn update_game(world: &ErgoScope<'_>) {
             world.despawn(e).unwrap();
         }
     }
+
+    if is_mouse_button_pressed(MouseButton::Left) {
+        spawn_dudes(world, &mut *get_physics(world).write(), 100);
+    }
 }
 
 fn get_physics(world: &ErgoScope<'_>) -> ComponentRef<PhysicsState> {
@@ -160,8 +164,8 @@ fn draw_game(world: &ErgoScope<'_>) {
         draw_circle_lines(
             draw_pos.x,
             draw_pos.y,
-            t * 100.0,
-            1.0,
+            t * screen_height() * 0.05,
+            0.5,
             Color::from_vec(YELLOW.to_vec() * (1.0 - t)),
         );
     }
@@ -172,22 +176,25 @@ fn init_game() -> World {
     {
         let ergo = ErgoScope::new(&mut world);
         let mut physics = PhysicsState::default();
-        let x_dudes = (NUM_DUDES as f32).sqrt() as i32;
-        for i in 0..NUM_DUDES {
-            // spawn dudes in a grid
-            let x = (i / x_dudes) as f32 / x_dudes as f32;
-            let y = (i % x_dudes) as f32 / x_dudes as f32;
-            let size = gen_range(2.0, 5.0);
-            let pos = Vec2::new(x as f32 * WORLD_SIZE.x, y * WORLD_SIZE.y);
-            let velocity = Vec2::new(gen_range(-1.0, 1.0), gen_range(-1.0, 1.0))
-                .normalize_or_zero()
-                * gen_range(MAX_SPEED * 0.1, MAX_SPEED);
-            spawn_dude(&ergo, &mut physics, pos, velocity, size);
-        }
+        spawn_dudes(&ergo, &mut physics, NUM_DUDES);
         ergo.spawn((physics,));
     }
 
     world
+}
+
+fn spawn_dudes(ergo: &ErgoScope, physics: &mut PhysicsState, num_dudes: i32) {
+    let x_dudes = (num_dudes as f32).sqrt() as i32;
+    for i in 0..num_dudes {
+        // spawn dudes in a grid
+        let x = (i / x_dudes) as f32 / x_dudes as f32;
+        let y = (i % x_dudes) as f32 / x_dudes as f32;
+        let size = gen_range(2.0, 5.0);
+        let pos = Vec2::new(x as f32 * WORLD_SIZE.x, y * WORLD_SIZE.y);
+        let velocity = Vec2::new(gen_range(-1.0, 1.0), gen_range(-1.0, 1.0)).normalize_or_zero()
+            * gen_range(MAX_SPEED * 0.1, MAX_SPEED);
+        spawn_dude(ergo, physics, pos, velocity, size);
+    }
 }
 
 fn spawn_dude(world: &ErgoScope, physics: &mut PhysicsState, pos: Vec2, velocity: Vec2, size: f32) {
@@ -210,6 +217,32 @@ async fn main() {
         let ergo = ErgoScope::new(&mut world);
         update_game(&ergo);
         draw_game(&ergo);
+
+        drop(ergo);
+        let text_size = screen_height() / 30.0;
+        let explosions = world.query::<&Explosion>().iter().count();
+        let dudes = world.query::<&Movement>().iter().count();
+        draw_text(
+            &format!("Dudes {}", dudes),
+            20.0,
+            20.0 + text_size,
+            text_size,
+            BLUE,
+        );
+        draw_text(
+            &format!("Explosions {}", explosions),
+            20.0,
+            20.0 + text_size * 2.0,
+            text_size,
+            BLUE,
+        );
+        draw_text(
+            &format!("FPS {}", get_fps()),
+            20.0,
+            20.0 + text_size * 3.0,
+            text_size,
+            BLUE,
+        );
 
         next_frame().await
     }
