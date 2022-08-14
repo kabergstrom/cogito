@@ -36,16 +36,20 @@ fn handle_collisions(world: &ErgoScope<'_>, collisions: Vec<EntityCollision>) {
             start_time: get_time(),
         };
         if world.contains(event.entity_a) && world.get::<Exploding>(event.entity_a).is_err() {
+            // remove physics body
             let shape = world.get::<Shape>(event.entity_a).unwrap();
             physics.write().remove(shape.read().rigidbody);
-            world.insert(event.entity_a, (explode,)).unwrap();
             world.remove::<(Shape,)>(event.entity_a).unwrap();
+            // add the Exploding component
+            world.insert(event.entity_a, (explode,)).unwrap();
         }
         if world.contains(event.entity_b) && world.get::<Exploding>(event.entity_b).is_err() {
+            // remove physics body
             let shape = world.get::<Shape>(event.entity_b).unwrap();
             physics.write().remove(shape.read().rigidbody);
-            world.insert(event.entity_b, (explode,)).unwrap();
             world.remove::<(Shape,)>(event.entity_b).unwrap();
+            // add the Exploding component
+            world.insert(event.entity_b, (explode,)).unwrap();
         }
     }
 }
