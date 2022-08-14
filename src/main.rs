@@ -4,7 +4,7 @@ use rapier2d::prelude::RigidBodyHandle;
 
 use std::time;
 
-use hecs::ergo::*;
+use hecs::{ergo::*, Entity};
 use macroquad::{prelude::*, rand::gen_range};
 
 struct Transform {
@@ -25,28 +25,12 @@ struct Exploding {
 }
 
 const WORLD_SIZE: Vec2 = const_vec2!([1000.0, 1000.0]);
-const NUM_DUDES: i32 = 30000;
+const NUM_DUDES: i32 = 3000;
 const EXPLODE_TIME: f64 = 1.5;
 const MAX_SPEED: f32 = 50.0;
 
-async fn update_game(world: &ErgoScope<'_>) {
+fn handle_collisions(world: &ErgoScope<'_>, collisions: Vec<EntityCollision>) {
     let mut physics = get_physics(world);
-    for (e, (mut transform, mut movement, shape)) in world
-        .query::<(&Transform, &Movement, &Shape)>()
-        .without::<&Exploding>()
-        .iter()
-    {
-        physics
-            .write()
-            .set_ball_velocity(shape.read().rigidbody, movement.read().velocity);
-        if !Rect::new(0.0, 0.0, WORLD_SIZE.x, WORLD_SIZE.y).contains(transform.read().pos) {
-            movement.write().velocity = Vec2::new(gen_range(-1.0, 1.0), gen_range(-1.0, 1.0))
-                .normalize_or_zero()
-                * gen_range(MAX_SPEED * 0.1, MAX_SPEED);
-        }
-    }
-
-    let collisions = physics.write().step();
     for event in collisions {
         let explode = Exploding {
             start_time: get_time(),
@@ -64,15 +48,40 @@ async fn update_game(world: &ErgoScope<'_>) {
             world.remove::<(Shape,)>(event.entity_b).unwrap();
         }
     }
-    for (e, (transform, exploding)) in world.query::<(&Transform, &Exploding)>().iter() {
+}
+
+async fn update_game(world: &ErgoScope<'_>) {
+    let mut physics = get_physics(world);
+    // sync velocities to physics state and randomize new velocity if outside screen
+    for (_, (transform, mut movement, shape)) in world
+        .query::<(&Transform, &Movement, &Shape)>()
+        .without::<&Exploding>()
+        .iter()
+    {
+        if !Rect::new(0.0, 0.0, WORLD_SIZE.x, WORLD_SIZE.y).contains(transform.read().pos) {
+            movement.write().velocity = Vec2::new(gen_range(-1.0, 1.0), gen_range(-1.0, 1.0))
+                .normalize_or_zero()
+                * gen_range(MAX_SPEED * 0.1, MAX_SPEED);
+        }
+        physics
+            .write()
+            .set_ball_velocity(shape.read().rigidbody, movement.read().velocity);
+    }
+
+    // step physics and handle collisions
+    let collisions = physics.write().step();
+    handle_collisions(world, collisions);
+
+    // despawn finished explosions
+    for (e, exploding) in world.query::<(&Exploding)>().iter() {
         if get_time() - exploding.read().start_time > EXPLODE_TIME {
             world.despawn(e).unwrap();
         }
     }
 
-    println!("{}", get_frame_time());
-    for (e, (mut transform, mut movement, shape)) in world
-        .query::<(&Transform, &Movement, &Shape)>()
+    // read physics position to transform component
+    for (_, (mut transform, shape)) in world
+        .query::<(&Transform, &Shape)>()
         .without::<&Exploding>()
         .iter()
     {
@@ -94,7 +103,8 @@ async fn draw_game(world: &ErgoScope<'_>) {
         1.0,
     ) * Mat4::from_scale(Vec3::new(screen_width(), screen_height(), 1.0));
     clear_background(BLACK);
-    for (e, (transform, shape)) in world
+    // draw dudes
+    for (_, (transform, shape)) in world
         .query::<(&Transform, &Shape)>()
         .without::<&Exploding>()
         .iter()
@@ -103,7 +113,8 @@ async fn draw_game(world: &ErgoScope<'_>) {
         let ball_size = get_physics(world).read().ball_size(shape.read().rigidbody);
         draw_circle(draw_pos.x, draw_pos.y, ball_size, RED);
     }
-    for (e, (transform, exploding)) in world.query::<(&Transform, &Exploding)>().iter() {
+    // draw explosions
+    for (_, (transform, exploding)) in world.query::<(&Transform, &Exploding)>().iter() {
         let draw_pos = projection.transform_point3(transform.read().pos.extend(0.0));
         let t = ((get_time() - exploding.read().start_time) / EXPLODE_TIME) as f32;
         draw_circle_lines(
@@ -121,6 +132,7 @@ fn init_game() -> World {
     let mut physics = PhysicsState::default();
     let x_dudes = (NUM_DUDES as f32).sqrt() as i32;
     for i in 0..NUM_DUDES {
+        // spawn dudes in a grid
         let x = (i / x_dudes) as f32 / x_dudes as f32;
         let y = (i % x_dudes) as f32 / x_dudes as f32;
         let size = gen_range(2.0, 5.0);
@@ -150,7 +162,6 @@ fn init_game() -> World {
 async fn main() {
     let mut world = init_game();
     loop {
-        println!("{}", world.len());
         let ergo = ErgoScope::new(&mut world);
         update_game(&ergo).await;
         draw_game(&ergo).await;
