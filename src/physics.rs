@@ -60,17 +60,18 @@ impl EventHandler for EventHandlerBuffer {
 #[derive(Default)]
 pub struct PhysicsState {
     /* Create other structures necessary for the simulation. */
-    gravity: Vec2,
-    integration_parameters: IntegrationParameters,
-    physics_pipeline: PhysicsPipeline,
-    island_manager: IslandManager,
-    broad_phase: BroadPhase,
-    narrow_phase: NarrowPhase,
-    rigid_body_set: RigidBodySet,
-    collider_set: ColliderSet,
-    impulse_joint_set: ImpulseJointSet,
-    multibody_joint_set: MultibodyJointSet,
-    ccd_solver: CCDSolver,
+    pub gravity: Vec2,
+    pub integration_parameters: IntegrationParameters,
+    pub physics_pipeline: PhysicsPipeline,
+    pub island_manager: IslandManager,
+    pub broad_phase: BroadPhase,
+    pub narrow_phase: NarrowPhase,
+    pub rigid_body_set: RigidBodySet,
+    pub collider_set: ColliderSet,
+    pub impulse_joint_set: ImpulseJointSet,
+    pub multibody_joint_set: MultibodyJointSet,
+    pub ccd_solver: CCDSolver,
+    pub query_pipeline: QueryPipeline,
 }
 
 impl PhysicsState {
@@ -90,6 +91,11 @@ impl PhysicsState {
             &(),
             &event_handler,
         );
+        self.query_pipeline.update(
+            &self.island_manager,
+            &self.rigid_body_set,
+            &self.collider_set,
+        );
         event_handler.buffer.into_inner().unwrap()
     }
     pub fn add_ball(&mut self, entity: Entity, pos: Vec2, size: f32) -> RigidBodyHandle {
@@ -99,7 +105,7 @@ impl PhysicsState {
             .build();
         let collider = ColliderBuilder::ball(size)
             .active_events(ActiveEvents::COLLISION_EVENTS)
-            .sensor(true)
+            .user_data(entity.to_bits().get() as u128)
             .build();
         let ball_body_handle = self.rigid_body_set.insert(rigid_body);
         self.collider_set
@@ -130,6 +136,28 @@ impl PhysicsState {
             rigidbody.position().translation.x,
             rigidbody.position().translation.y,
         )
+    }
+
+    pub fn get_entities_within(
+        &self,
+        pos: Vec2,
+        radius: f32,
+        cb: impl Fn(ColliderHandle, Entity) -> bool,
+    ) {
+        self.query_pipeline.intersections_with_shape(
+            &self.rigid_body_set,
+            &self.collider_set,
+            &Isometry::new(vector![pos.x, pos.y], 0.0),
+            &Ball::new(radius),
+            QueryFilter::new(),
+            |collider| {
+                cb(
+                    collider,
+                    Entity::from_bits(self.collider_set.get(collider).unwrap().user_data as u64)
+                        .unwrap(),
+                )
+            },
+        );
     }
 
     pub fn remove(&mut self, rigidbody: RigidBodyHandle) {
